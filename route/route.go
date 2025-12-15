@@ -14,4 +14,13 @@ func InitRoute() {
 	R.Use(middleware.CorsMiddleware())
 
 	R.GET("/ping", handler.Ping)
+
+	auth := R.Group("/auth")
+	auth.POST("/register", handler.RegisterUser)
+	auth.POST("/login", handler.UserLogin)
+
+	user := R.Group("/user")
+	user.Use(middleware.JWTAuth("user"))
+	user.GET(":id", handler.GetUserInfoByID)
+	user.GET("", handler.GetUserInfoByEmail)
 }

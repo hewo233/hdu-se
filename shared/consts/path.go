@@ -1,5 +1,6 @@
 package consts
 
 const (
-	DBEnvFile = "./config/db"
+	DBEnvFile  = "./config/db"
+	JWTKeyFile = "./config/jwt"
 )
