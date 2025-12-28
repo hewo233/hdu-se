@@ -1,5 +1,6 @@
 package consts
 
 const (
-	UserTable = "users"
+	UserTable         = "users"
+	ConversationTable = "conversations"
 )
