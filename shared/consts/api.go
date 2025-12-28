@@ -1,6 +1,9 @@
 package consts
 
 const (
-	ApiURL          = "https://api.coze.ai/v1"
-	ConversationURL = ApiURL + "/conversation"
+	ApiV1URL = "https://api.coze.ai/v1"
+	ApiV3URL = "https://api.coze.ai/v3"
+
+	CreateConversationURL   = ApiV1URL + "/conversation/create"
+	RetrieveConversationURL = ApiV3URL + "/chat/retrieve"
 )
