@@ -367,12 +367,12 @@ func RetrieveConversation(c *gin.Context) {
 	})
 }
 
-type messageListRequest struct {
+type ChatMessageListRequest struct {
 	ConversationID string `form:"conversation_id" binding:"required"`
 	ChatID         string `form:"chat_id" binding:"required"`
 }
 
-type messageListResponse struct {
+type ChatMessageListResponse struct {
 	Messages []struct {
 		Content string `json:"content"`
 		Role    string `json:"role"`
@@ -380,8 +380,8 @@ type messageListResponse struct {
 	} `json:"messages"`
 }
 
-func MessageList(c *gin.Context) {
-	var req messageListRequest
+func ChatMessageList(c *gin.Context) {
+	var req ChatMessageListRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Report{
 			Code:   40000,
@@ -391,7 +391,7 @@ func MessageList(c *gin.Context) {
 	}
 
 	client := &http.Client{}
-	apiURL := consts.MessageListURL + "?conversation_id=" + req.ConversationID + "&chat_id=" + req.ChatID
+	apiURL := consts.ChatMessageListURL + "?conversation_id=" + req.ConversationID + "&chat_id=" + req.ChatID
 
 	proxyReq, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -450,8 +450,105 @@ func MessageList(c *gin.Context) {
 		})
 		return
 	}
-	response := &messageListResponse{}
+	response := &ChatMessageListResponse{}
 
+	for _, msg := range cozeResp.Data {
+		response.Messages = append(response.Messages, struct {
+			Content string `json:"content"`
+			Role    string `json:"role"`
+			Type    string `json:"type"`
+		}{
+			Content: msg.Content,
+			Role:    msg.Role,
+			Type:    msg.Type,
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+type conversationMessageListRequest struct {
+	ConversationID string `form:"conversation_id" binding:"required"`
+}
+
+type conversationMessageListResponse struct {
+	Messages []struct {
+		Content string `json:"content"`
+		Role    string `json:"role"`
+		Type    string `json:"type"`
+	} `json:"messages"`
+}
+
+func ConversationMessageList(c *gin.Context) {
+	var req conversationMessageListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.Report{
+			Code:   40000,
+			Result: "Invalid request parameters",
+		})
+		return
+	}
+
+	client := &http.Client{}
+	apiURL := consts.ConversationMessageListURL + "?conversation_id=" + req.ConversationID
+
+	proxyReq, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50001,
+			Result: "Failed to create request",
+		})
+		return
+	}
+	proxyReq.Header.Set("Authorization", "Bearer "+models.CozeToken)
+	proxyReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50002,
+			Result: "Failed to call external API",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50003,
+			Result: "Failed to read response",
+		})
+		return
+	}
+
+	type cozeMessage struct {
+		Content string `json:"content"`
+		Role    string `json:"role"`
+		Type    string `json:"type"`
+	}
+
+	type cozeAPIResponse struct {
+		Code int           `json:"code"`
+		Data []cozeMessage `json:"data"`
+		Msg  string        `json:"msg"`
+	}
+	var cozeResp cozeAPIResponse
+	if err := json.Unmarshal(body, &cozeResp); err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50004,
+			Result: "Failed to parse external response",
+		})
+		return
+	}
+	if cozeResp.Code != 0 {
+		c.JSON(http.StatusBadGateway, models.Report{
+			Code:   cozeResp.Code,
+			Result: cozeResp.Msg,
+		})
+		return
+	}
+
+	response := &conversationMessageListResponse{}
 	for _, msg := range cozeResp.Data {
 		response.Messages = append(response.Messages, struct {
 			Content string `json:"content"`
