@@ -11,6 +11,7 @@ import (
 	"github.com/hewo233/hdu-se/shared/consts"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 func GetUserId(c *gin.Context) (uint, error) {
@@ -24,22 +25,31 @@ func GetUserId(c *gin.Context) (uint, error) {
 		return 0, errors.New("user ID not found in context")
 	}
 
-	userID, ok := jwtID.(uint)
+	userIDStr, ok := jwtID.(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, models.Report{
-			Code:   40101,
-			Result: "Unauthorized: Invalid User ID type",
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50000,
+			Result: "Internal Server Error: Invalid User ID format",
 		})
 		c.Abort()
-		return 0, errors.New("invalid user ID")
+		return 0, errors.New("invalid user ID format")
 	}
 
-	return userID, nil
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50001,
+			Result: "Internal Server Error: Failed to parse User ID",
+		})
+		c.Abort()
+		return 0, errors.New("failed to parse user ID")
+	}
+
+	return uint(userID), nil
 }
 
 type createConversationRequest struct {
-	BotID string `json:"bot_id" binding:"required"`
-	Name  string `json:"name" binding:"optional"`
+	Name string `json:"name" binding:"omitempty"` // 允许空值
 }
 type createConversationResponse struct {
 	ConversationID string `json:"conversation_id"`
@@ -61,7 +71,18 @@ func CreateConversation(c *gin.Context) {
 		})
 		return
 	}
-	cozeReqBody, err := json.Marshal(req)
+
+	type cozeReqPayload struct {
+		BotID string `json:"bot_id"`
+		Name  string `json:"name"`
+	}
+
+	cozeReq := &cozeReqPayload{
+		BotID: consts.BotID,
+		Name:  req.Name,
+	}
+
+	cozeReqBody, err := json.Marshal(cozeReq)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.Report{
 			Code:   50001,
@@ -84,7 +105,10 @@ func CreateConversation(c *gin.Context) {
 
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to call external api"})
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50002,
+			Result: "Failed to call external API" + err.Error(),
+		})
 		return
 	}
 	defer resp.Body.Close()
@@ -163,8 +187,9 @@ type createChatRequest struct {
 }
 
 type createChatResponse struct {
-	ChatID string `json:"chat_id"`
-	Status int    `json:"status"`
+	ConversationID string `json:"conversation_id"`
+	ChatID         string `json:"chat_id"`
+	Status         string `json:"status"`
 }
 
 func CreateChat(c *gin.Context) {
@@ -177,7 +202,7 @@ func CreateChat(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Report{
 			Code:   40000,
-			Result: "Invalid request parameters",
+			Result: "Invalid request parameters" + err.Error(),
 		})
 		return
 	}
@@ -219,8 +244,18 @@ func CreateChat(c *gin.Context) {
 		return
 	}
 
+	var prettyJSON bytes.Buffer
+	if err := json.Indent(&prettyJSON, cozeReqBody, "", "  "); err == nil {
+		fmt.Printf("Coze API Request:\n%s\n", prettyJSON.String())
+	} else {
+		fmt.Printf("Coze API Request: %s\n", string(cozeReqBody))
+	}
+
 	client := &http.Client{}
 	apiURL := consts.CreateChatURL
+	if req.ConversationID != "" {
+		apiURL += "?conversation_id=" + req.ConversationID
+	}
 	proxyReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(cozeReqBody))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.Report{
@@ -254,8 +289,9 @@ func CreateChat(c *gin.Context) {
 	type cozeAPIResponse struct {
 		Code int `json:"code"`
 		Data struct {
-			ID     string `json:"id"`
-			Status int    `json:"status"`
+			ID             string `json:"id"`
+			ConversationID string `json:"conversation_id"`
+			Status         string `json:"status"`
 		} `json:"data"`
 		Msg string `json:"msg"`
 	}
@@ -276,8 +312,9 @@ func CreateChat(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, createChatResponse{
-		ChatID: cozeResp.Data.ID,
-		Status: cozeResp.Data.Status,
+		ConversationID: cozeResp.Data.ConversationID,
+		ChatID:         cozeResp.Data.ID,
+		Status:         cozeResp.Data.Status,
 	})
 }
 
@@ -295,7 +332,7 @@ func RetrieveConversation(c *gin.Context) {
 	if err := c.ShouldBindQuery(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Report{
 			Code:   40000,
-			Result: "Invalid request parameters",
+			Result: "Invalid request parameters" + err.Error(),
 		})
 		return
 	}

@@ -21,6 +21,15 @@ func InitRoute() {
 
 	user := R.Group("/user")
 	user.Use(middleware.JWTAuth("user"))
-	user.GET(":id", handler.GetUserInfoByID)
+	user.GET("/:id", handler.GetUserInfoByID)
 	user.GET("", handler.GetUserInfoByEmail)
+
+	coze := R.Group("/coze")
+	coze.Use(middleware.JWTAuth("user"))
+	coze.POST("/conversation", handler.CreateConversation)
+	coze.GET("/conversation", handler.ListConversations)
+	coze.POST("/chat", handler.CreateChat)
+	coze.GET("/chat", handler.RetrieveConversation)
+	coze.GET("/chat/message", handler.ChatMessageList)
+	coze.GET("/conversation/message", handler.ConversationMessageList)
 }

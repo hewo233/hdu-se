@@ -1,8 +1,8 @@
 package consts
 
 const (
-	ApiV1URL = "https://api.coze.ai/v1"
-	ApiV3URL = "https://api.coze.ai/v3"
+	ApiV1URL = "https://api.coze.cn/v1"
+	ApiV3URL = "https://api.coze.cn/v3"
 
 	BotID = "7563218003241058343"
 
