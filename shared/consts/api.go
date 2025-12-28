@@ -6,4 +6,5 @@ const (
 
 	CreateConversationURL   = ApiV1URL + "/conversation/create"
 	RetrieveConversationURL = ApiV3URL + "/chat/retrieve"
+	MessageListURL          = ApiV3URL + "/chat/message/list"
 )

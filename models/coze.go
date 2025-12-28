@@ -5,8 +5,8 @@ import "os"
 type Conversation struct {
 	ID             uint   `gorm:"primaryKey" json:"id"`
 	UserID         uint   `gorm:"not null" json:"user_id"`
-	ConversationID uint   `gorm:"not null" json:"conversation_id"`
-	Title          string `gorm:"not null" json:"title"`
+	ConversationID string   `gorm:"not null" json:"conversation_id"`
+	Name          string `gorm:"not null" json:"title"`
 }
 
 func NewConversation() *Conversation {

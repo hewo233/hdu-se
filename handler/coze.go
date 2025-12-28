@@ -3,12 +3,38 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
+	"github.com/hewo233/hdu-se/db"
 	"github.com/hewo233/hdu-se/models"
 	"github.com/hewo233/hdu-se/shared/consts"
 	"io"
 	"net/http"
 )
+
+func GetUserId(c *gin.Context) (uint, error) {
+	jwtID, exists := c.Get("id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, models.Report{
+			Code:   40100,
+			Result: "Unauthorized: User ID not found in context",
+		})
+		c.Abort()
+		return 0, errors.New("user ID not found in context")
+	}
+
+	userID, ok := jwtID.(uint)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, models.Report{
+			Code:   40101,
+			Result: "Unauthorized: Invalid User ID type",
+		})
+		c.Abort()
+		return 0, errors.New("invalid user ID")
+	}
+
+	return userID, nil
+}
 
 type createConversationRequest struct {
 	BotID string `json:"bot_id" binding:"required"`
@@ -76,6 +102,27 @@ func CreateConversation(c *gin.Context) {
 
 	if cozeResp.Code != 0 {
 		c.JSON(http.StatusBadGateway, gin.H{"error": cozeResp.Msg, "code": cozeResp.Code})
+		return
+	}
+
+	// write into database
+
+	userID, err := GetUserId(c)
+	if err != nil {
+		return
+	}
+
+	conversation := models.Conversation{
+		ConversationID: cozeResp.Data.ID,
+		UserID:         userID,
+		Name:           req.Name,
+	}
+	result := db.DB.Table(consts.ConversationTable).Create(&conversation)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50002,
+			Result: "Failed to save conversation to database",
+		})
 		return
 	}
 
@@ -169,4 +216,103 @@ func RetrieveConversation(c *gin.Context) {
 	c.JSON(http.StatusOK, retrieveConversationResponse{
 		Status: cozeResp.Data.Status,
 	})
+}
+
+type messageListRequest struct {
+	ConversationID string `form:"conversation_id" binding:"required"`
+	ChatID         string `form:"chat_id" binding:"required"`
+}
+
+type messageListResponse struct {
+	Messages []struct {
+		Content string `json:"content"`
+		Role    string `json:"role"`
+		Type    string `json:"type"`
+	} `json:"messages"`
+}
+
+func MessageList(c *gin.Context) {
+	var req messageListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.Report{
+			Code:   40000,
+			Result: "Invalid request parameters",
+		})
+		return
+	}
+
+	client := &http.Client{}
+	apiURL := consts.MessageListURL + "?conversation_id=" + req.ConversationID + "&chat_id=" + req.ChatID
+
+	proxyReq, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50001,
+			Result: "Failed to create request",
+		})
+		return
+	}
+	proxyReq.Header.Set("Authorization", "Bearer "+models.CozeToken)
+	proxyReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50002,
+			Result: "Failed to call external API",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50003,
+			Result: "Failed to read response",
+		})
+		return
+	}
+
+	type cozeMessage struct {
+		Content string `json:"content"`
+		Role    string `json:"role"`
+		Type    string `json:"type"`
+	}
+
+	type cozeAPIResponse struct {
+		Code int           `json:"code"`
+		Data []cozeMessage `json:"data"`
+		Msg  string        `json:"msg"`
+	}
+
+	var cozeResp cozeAPIResponse
+	if err := json.Unmarshal(body, &cozeResp); err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50004,
+			Result: "Failed to parse external response",
+		})
+		return
+	}
+	if cozeResp.Code != 0 {
+		c.JSON(http.StatusBadGateway, models.Report{
+			Code:   cozeResp.Code,
+			Result: cozeResp.Msg,
+		})
+		return
+	}
+	response := &messageListResponse{}
+
+	for _, msg := range cozeResp.Data {
+		response.Messages = append(response.Messages, struct {
+			Content string `json:"content"`
+			Role    string `json:"role"`
+			Type    string `json:"type"`
+		}{
+			Content: msg.Content,
+			Role:    msg.Role,
+			Type:    msg.Type,
+		})
+	}
+	c.JSON(http.StatusOK, response)
 }
