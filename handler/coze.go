@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/hewo233/hdu-se/db"
 	"github.com/hewo233/hdu-se/models"
@@ -129,6 +130,154 @@ func CreateConversation(c *gin.Context) {
 	// 返回给客户端
 	c.JSON(http.StatusOK, createConversationResponse{
 		ConversationID: cozeResp.Data.ID,
+	})
+}
+
+type listConversationsResponse struct {
+	Conversations []models.Conversation `json:"conversations"`
+}
+
+func ListConversations(c *gin.Context) {
+	userID, err := GetUserId(c)
+	if err != nil {
+		return
+	}
+	conversations := []models.Conversation{}
+	result := db.DB.Table(consts.ConversationTable).Where("user_id = ?", userID).Find(&conversations)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50003,
+			Result: "Failed to retrieve conversations from database",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, listConversationsResponse{
+		Conversations: conversations,
+	})
+}
+
+type createChatRequest struct {
+	ConversationID string `json:"conversation_id" binding:"required"`
+	Message        string `json:"message" binding:"required"`
+}
+
+type createChatResponse struct {
+	ChatID string `json:"chat_id"`
+	Status int    `json:"status"`
+}
+
+func CreateChat(c *gin.Context) {
+	userID, err := GetUserId(c)
+	if err != nil {
+		return
+	}
+	userIdStr := fmt.Sprintf("%d", userID)
+	var req createChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.Report{
+			Code:   40000,
+			Result: "Invalid request parameters",
+		})
+		return
+	}
+
+	type cozeMessage struct {
+		Role        string `json:"role"`
+		Type        string `json:"type"`
+		ContentType string `json:"content_type"`
+		Content     string `json:"content"`
+	}
+
+	type cozeChatPayload struct {
+		BotID              string        `json:"bot_id"`
+		UserID             string        `json:"user_id"`
+		Stream             bool          `json:"stream"`
+		AdditionalMessages []cozeMessage `json:"additional_messages"`
+	}
+
+	cozeReq := cozeChatPayload{
+		BotID:  consts.BotID,
+		UserID: userIdStr,
+		Stream: false,
+		AdditionalMessages: []cozeMessage{
+			{
+				Role:        "user",
+				Type:        "question",
+				ContentType: "text",
+				Content:     req.Message,
+			},
+		},
+	}
+
+	cozeReqBody, err := json.Marshal(cozeReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50001,
+			Result: "Failed to create request body",
+		})
+		return
+	}
+
+	client := &http.Client{}
+	apiURL := consts.CreateChatURL
+	proxyReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(cozeReqBody))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50002,
+			Result: "Failed to create request",
+		})
+		return
+	}
+	proxyReq.Header.Set("Authorization", "Bearer "+models.CozeToken)
+	proxyReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50003,
+			Result: "Failed to call external API",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50004,
+			Result: "Failed to read response",
+		})
+		return
+	}
+
+	type cozeAPIResponse struct {
+		Code int `json:"code"`
+		Data struct {
+			ID     string `json:"id"`
+			Status int    `json:"status"`
+		} `json:"data"`
+		Msg string `json:"msg"`
+	}
+	var cozeResp cozeAPIResponse
+	if err := json.Unmarshal(body, &cozeResp); err != nil {
+		c.JSON(http.StatusInternalServerError, models.Report{
+			Code:   50005,
+			Result: "Failed to parse external response",
+		})
+		return
+	}
+	if cozeResp.Code != 0 {
+		c.JSON(http.StatusBadGateway, models.Report{
+			Code:   cozeResp.Code,
+			Result: cozeResp.Msg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, createChatResponse{
+		ChatID: cozeResp.Data.ID,
+		Status: cozeResp.Data.Status,
 	})
 }
 
